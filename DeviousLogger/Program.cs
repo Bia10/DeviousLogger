@@ -10,7 +10,7 @@ internal static class Program
         var processStartInfo = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "java",
-            Arguments = "-jar -Xmx2048m devious-client-launcher.jar --debug",
+            Arguments = "-jar -Xmx2048m devious-client-launcher-1.0.2.jar --debug",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -22,25 +22,23 @@ internal static class Program
         var errorBuffer = new List<string>();
         var outputSubject = new Subject<string>();
 
-        Observable<string> tradeReqObservable = outputSubject
-            .Where(line => line.Contains("TRADEREQ", StringComparison.Ordinal))
-            .Select(line => line.Replace("SEL? [Client] DEBUG injected-client - Chat message type TRADEREQ: ", string.Empty));
-
-        var currentDate = DateTime.Now.ToString(System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern);
-        currentDate = currentDate.Replace("/", "-").Replace(" ", "_");
-
-        tradeReqObservable
-            .Where(line => line.Contains("Packet", StringComparison.Ordinal))
-            .Subscribe(async packet =>
+        outputSubject
+            .Where(line => !line.Contains("DEBUG", StringComparison.Ordinal))
+            .Select(line => line.AppendCurrentDateTime(DateTime.Now))
+            .Subscribe(async line =>
             {
-                await AppendToLogAsync($"packets_{currentDate}.log", packet).ConfigureAwait(false);
-            });
+                string? logFileName = null;
 
-        tradeReqObservable
-            .Where(line => line.Contains("menuAction", StringComparison.Ordinal))
-            .Subscribe(async menuAction =>
-            {
-                await AppendToLogAsync($"menuActions_{currentDate}.log", menuAction).ConfigureAwait(false);
+                var currentDate = DateTime.Now.ToString(System.Globalization.CultureInfo.CurrentCulture.DateTimeFormat.ShortDatePattern);
+                currentDate = currentDate.Replace("/", "-").Replace(" ", "_");
+
+                if (line.Contains("Packet", StringComparison.Ordinal))
+                    logFileName = $"packets_{currentDate}.log";
+                else if (line.Contains("menuAction", StringComparison.Ordinal))
+                    logFileName = $"menuActions_{currentDate}.log";
+
+                if (logFileName is not null)
+                    await AppendToLogAsync(logFileName, line).ConfigureAwait(false);
             });
 
         var consumeStdOut = Task.Run(async () =>
@@ -76,9 +74,15 @@ internal static class Program
         }
     }
 
-    private static async Task AppendToLogAsync(string fileName, string message)
+    private static async Task AppendToLogAsync(string? fileName, string message)
     {
-        await using var sw = new StreamWriter(fileName, append: true);
-        await sw.WriteLineAsync(message).ConfigureAwait(false);
+        if (fileName is not null)
+        {
+            await using var sw = new StreamWriter(fileName, append: true);
+            await sw.WriteLineAsync(message).ConfigureAwait(false);
+        }
     }
+
+    private static string AppendCurrentDateTime(this string input, DateTime dateTime)
+        => $"{dateTime:yyyy-MM-dd HH:mm:ss} {input}";
 }
